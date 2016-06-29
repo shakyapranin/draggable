@@ -1,0 +1,402 @@
+<?php
+
+module_load_include('module', 'draggable', 'draggable.constants');
+
+// Implements hook_menu().
+/**
+ * @return array
+ * Menu
+ */
+function draggable_menu()
+{
+    $items = array();
+
+
+    $product_property_bundles = variable_get('draggable_saved_product_property_bundles', '');
+    if (!empty($product_property_bundles)) {
+        foreach ($product_property_bundles as $product_property_bundle) {
+            // Slideshow manage page.
+            $items['admin/content/product_property/' . $product_property_bundle . '/draggable'] = array(
+                'title' => t('Draggable interface'),
+                'description' => 'Manage draggable list.',
+                'page callback' => 'drupal_get_form',
+                'page arguments' => array('draggable_manage', 2, 3),
+                'access callback' => true,
+            );
+        }
+    }
+
+    /*    // Slideshow manage page.
+        $items['admin/config/user-interface/draggable'] = array(
+            'title' => t('Draggable'),
+            'description' => 'Manage draggable list.',
+            'page callback' => 'drupal_get_form',
+            'page arguments' => array('draggable_manage'),
+            'access arguments' => array('administer content'),
+        );
+
+        // Autocomplete callback.
+        $items['draggable/autocomplete'] = array(
+            'page callback' => 'draggable_autocomplete',
+            'access arguments' => array('administer content'),
+            'type' => MENU_CALLBACK,
+        );*/
+
+    //Settings page for draggable module
+    // $items['admin/config/settings/draggable'] = array(
+    //     'title' => 'Administer Draggable',
+    //     'description' => 'Configure settings for draggable.',
+    //     'page callback' => 'drupal_get_form',
+    //     'page arguments' => array('draggable_settings_form'),
+    //     'access callback' => true,
+    //     'file' => 'draggable.admin.inc',
+    // );
+
+    return $items;
+}
+
+// Implements hook_theme().
+/**
+ * @param $existing
+ * @param $type
+ * @param $theme
+ * @param $path
+ * @return array
+ */
+function draggable_theme($existing, $type, $theme, $path)
+{
+    return array(
+        'draggable_manage' => array(
+            'render element' => 'form',
+        ),
+    );
+}
+
+
+function draggable_page_view($entity_type, $bundle)
+{
+    return drupal_render(draggable_manage($entity_type, $bundle));
+}
+
+
+/**
+ * @return array
+ * Populate the array
+ */
+function draggable_getdata($entity_type, $bundle)
+{
+
+    $data = array();
+    $items = bundle_load($entity_type, $bundle, 'type', array());
+    $weight = 1;
+    if ($items) {
+        foreach ($items as $item) {
+            $data[] = array(
+                'entity_type' => $entity_type,
+                'nid' => $item->id,
+                'caption' => $item->name,
+                'weight' => strval($weight++),
+                'bundle' => $bundle,
+            );
+        }
+    }
+    return $data;
+}
+
+/**
+ * @return mixed
+ * Main function to manage UI view
+ */
+function draggable_manage($form, $form_state, $entity_type, $bundle)
+{
+    global $base_url;
+    $slides = variable_get('draggable_slides' . $entity_type . $bundle, array());
+    if (empty($slides)) {
+        $slides = draggable_getdata($entity_type, $bundle);
+    } else {
+        $eSlides = array(); // Existing slides in draggable
+        foreach ($slides as $slide) {
+            array_push($eSlides, $slide['nid']);
+        }
+        // Add new data not previously saved in variable_get
+        $total_slides = bundle_load($entity_type, $bundle, 'type', array());
+        $currentSlides = array();// Current number of slides
+        foreach ($total_slides as $slide) {
+            array_push($currentSlides, $slide->id);
+        }
+
+        //$outputRem = array_merge(array_diff($currentSlides, $eSlides), array_diff($eSlides, $currentSlides));
+        $outputRem = array_merge(array_diff($currentSlides, $eSlides), array());
+        if ($outputRem) {
+            foreach ($outputRem as $key => $value) {
+                array_push($eSlides, $value);
+            }
+
+
+            $lastItem = end($slides)['weight'];
+            // Push each remaining item into slides
+            foreach ($outputRem as $rem_item) {
+                $product_property = bundle_load($entity_type, $bundle, 'type', array($rem_item));
+                if ($product_property) {
+                    $itPush = array(
+                        'nid' => $rem_item,
+                        'caption' => $product_property[$rem_item]->name,
+                        'weight' => strval($lastItem + 1),
+                        'entity_type' => $entity_type,
+                        'bundle' => $bundle,
+                    );
+                    array_push($slides, $itPush);
+                }
+
+            }
+        }
+
+        // Remove deleted sports
+        $removeRem = array_merge(array_diff($eSlides, $currentSlides), array());
+        if ($removeRem) {
+            foreach ($removeRem as $key => $value) {
+                foreach ($slides as $key => $slide) {
+                    if ($slide['nid'] == $value) {
+                        unset($slides[$key]);
+                    }
+                }
+                if (($key = array_search($value, $currentSlides)) !== false) {
+                    unset($currentSlides[$key]);
+                }
+            }
+        }
+
+
+    }
+
+
+    $form['#tree'] = TRUE;
+    foreach ($slides as $id => $slide) {
+        $product_property = bundle_load($entity_type, $bundle, 'type', array($slide['nid']));
+        $title = $product_property[$slide['nid']]->name;
+
+        if (!empty($title)) {
+            // Textfield to hold content id.
+            $form['slides'][$slide['nid']]['node'] = array(
+                '#type' => 'markup',
+                //'#autocomplete_path' => 'ui-slideshow/autocomplete',
+                '#markup' => $title,
+            );
+            $form['slides'][$slide['nid']]['entity_type'] = array(
+                '#type' => 'hidden',
+                '#default_value' => $slide['entity_type'],
+            );
+            $form['slides'][$slide['nid']]['bundle'] = array(
+                '#type' => 'hidden',
+                '#default_value' => $slide['bundle'],
+            );
+            $form['slides'][$slide['nid']]['nid'] = array(
+                '#type' => 'hidden',
+                '#default_value' => $slide['nid'],
+            );
+            // Caption for the slideshow.
+            $form['slides'][$slide['nid']]['caption'] = array(
+                '#type' => 'hidden',
+                '#default_value' => $product_property[$slide['nid']]->name,
+                '#title_display' => 'invisible',
+            );
+            // This field is invisible, but contains sort info (weights).
+            $form['slides'][$slide['nid']]['weight'] = array(
+                '#type' => 'weight',
+                '#title' => t('Weight'),
+                '#default_value' => $slide['weight'],
+            );
+            // Operation links (to remove rows).
+            $form['slides'][$slide['nid']]['op'] = array(
+                //'#access' => false,
+                //'#markup' => '<a href="'.$base_url.'/admin/content/'.$entity_type.'/'.$slide['nid'].'/edit/'.$bundle.'" class="remove-row">' . t('Edit') . '</a>',
+                '#markup' => '<a href="' . $base_url . '/admin/content/' . $entity_type . '/' . $slide['nid'] . '/edit/' . $bundle . '" class="edit-row">' . t('Edit') . '</a>',
+            );
+        }
+
+    }
+
+    // jQuery to implement remove feature. Setting the text field to empty
+    // and submitting the form will remove the rows.
+    $js = <<<EOD
+(function ($) {
+  $(function() {
+    $('a.remove-row').click(function() {
+      $(this).closest('tr').fadeOut(function() {
+        $(this).find('input.form-autocomplete').val('')
+          .closest('form').submit();
+      });
+    });;
+  });
+})(jQuery);
+EOD;
+
+    drupal_add_js($js, array('type' => 'inline'));
+
+    $form['submit'] = array('#type' => 'submit', '#value' => t('Save changes'));
+
+    return $form;
+}
+
+// This looks for the node id in the submitted value, "Test title string [123]"
+function draggable_manage_submit($form, &$form_state)
+{
+    $slides = array();
+
+    foreach ($form_state['values']['slides'] as $slide) {
+        $slides[] = array(
+            //'nid' => $nid,
+            'nid' => $slide['nid'],
+            'caption' => $slide['caption'],
+            'weight' => $slide['weight'],
+            'entity_type' => $slide['entity_type'],
+            'bundle' => $slide['bundle'],
+        );
+    }
+
+    if (!empty($slides)) {
+        usort($slides, '_draggable_arraysort');
+    }
+
+    variable_set('draggable_slides' . $slide['entity_type'] . $slide['bundle'], $slides);
+    drupal_set_message(t('Order has been saved.'));
+}
+
+// Custom array sort function by weight.
+function _draggable_arraysort($a, $b)
+{
+    if (isset($a['weight']) && isset($b['weight'])) {
+        return $a['weight'] < $b['weight'] ? -1 : 1;
+    }
+    return 0;
+}
+
+// Search titles of article and page contents.
+function draggable_autocomplete($string)
+{
+    $query = db_select('node', 'n');
+    $query->fields('n', array('nid', 'title'));
+
+    $types = array('article', 'page'); // Add additional content types as you like.
+    if (!empty($types)) {
+        $db_or = db_or();
+        foreach ($types as $type) {
+            if (!empty($type)) {
+                $db_or->condition('n.type', $type, '=');
+            }
+        }
+        $query->condition($db_or);
+    }
+
+    $result = $query
+        ->condition('n.title', '%' . db_like($string) . '%', 'LIKE')
+        ->range(0, 10)
+        ->execute();
+
+    $matches = array();
+    foreach ($result as $row) {
+        $matches[$row->title . " [$row->nid]"] = check_plain($row->title) . " [$row->nid]";
+    }
+
+    drupal_json_output($matches);
+}
+
+// Theme function for draggable_manage().
+function theme_draggable_manage($variables)
+{
+    $form = $variables['form'];
+
+    $rows = array();
+    foreach (element_children($form['slides']) as $nid) {
+        $form['slides'][$nid]['weight']['#attributes']['class'] = array('slides-order-weight');
+        $rows[] = array(
+            'data' => array(
+                array('class' => array('slide-cross')),
+                drupal_render($form['slides'][$nid]['node']),
+                //drupal_render($form['slides'][$nid]['caption']),
+                drupal_render($form['slides'][$nid]['weight']),
+                drupal_render($form['slides'][$nid]['op']),
+            ),
+            'class' => array('draggable'),
+        );
+    }
+
+    $header = array(
+        '',
+        t('Content'),
+        //t('Caption (If empty, title is used)'),
+        t('Weight'),
+        t('Operations')
+    );
+    $output = drupal_render($form['note']);
+    $output .= theme('table', array('header' => $header, 'rows' => $rows, 'attributes' => array('id' => 'slides-order')));
+    $output .= drupal_render_children($form);
+
+    drupal_add_tabledrag('slides-order', 'order', 'sibling', 'slides-order-weight');
+
+    return $output;
+}
+
+
+/**
+ * @param $element
+ * @param $form_state
+ * @param $context
+ * Order override
+ */
+function draggable_field_widget_form_alter(&$element, &$form_state, $context)
+{
+    global $conf;
+
+    if (isset($conf['draggable_slidesproduct_propertyproduct_category'])) {
+        $product_category_order = variable_get('draggable_slidesproduct_propertyproduct_category', '');
+        $pco_ids = array();
+        foreach ($product_category_order as $porder) {
+            array_push($pco_ids, $porder['nid']);
+        }
+        //Order options for product category
+        if (isset($element['#field_name'])) {
+            if ($element['#field_name'] == 'field_product_category') {
+                $element['#options'] = sortArrayByArray($element['#options'], $pco_ids);
+            }
+        }
+
+    }
+
+
+    if (isset($conf['draggable_slidesproduct_propertysport_category'])) {
+        $sport_category_order = variable_get('draggable_slidesproduct_propertysport_category', '');
+        $spco_ids = array();
+        foreach ($sport_category_order as $sporder) {
+            array_push($spco_ids, $sporder['nid']);
+        }
+
+        //Order options for sport category
+        if (isset($element['#field_name'])) {
+            if ($element['#field_name'] == 'field_sport_category') {
+                $element['#options'] = sortArrayByArray($element['#options'], $spco_ids);
+            }
+        }
+    }
+
+
+}
+
+
+/**
+ * @param array $array
+ * @param array $orderArray
+ * @return array
+ * Function to sort array as per key or orderArray
+ */
+function sortArrayByArray(array $array, array $orderArray)
+{
+    $ordered = array();
+    foreach ($orderArray as $key) {
+        if (array_key_exists($key, $array)) {
+            $ordered[$key] = $array[$key];
+            unset($array[$key]);
+        }
+    }
+    return $ordered + $array;
+}
